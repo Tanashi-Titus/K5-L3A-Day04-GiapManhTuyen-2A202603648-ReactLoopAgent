@@ -33,7 +33,7 @@ def run_case(case, args):
 
 def main():
     parser = argparse.ArgumentParser(description='Chạy agent và chấm eval 0–100')
-    choices = ['openai', 'gemini', 'anthropic', 'openrouter']
+    choices = ['openai', 'gemini', 'anthropic', 'openrouter', 'groq']
     parser.add_argument('--provider', choices=choices, default=os.getenv('PROVIDER', 'openai'))
     parser.add_argument('--model', default=os.getenv('MODEL'))
     parser.add_argument('--judge-provider', choices=choices, default=os.getenv('JUDGE_PROVIDER'))
@@ -66,6 +66,10 @@ def main():
     report = {'summary': summarize(results), 'config': {'provider': args.provider, 'model': args.model,
               'judge_provider': args.judge_provider, 'judge_model': args.judge_model, 'max_steps': args.max_steps,
               'dataset': 'bonus' if args.bonus else 'core'}, 'cases': results}
+    if args.provider == 'gemini':
+        report['config']['temperature'] = 0
+    if args.judge_provider == 'gemini':
+        report['config']['judge_temperature'] = 0
     summary = report['summary']
     if args.bonus:
         full_run = not args.case and len(selected) == len(cases)

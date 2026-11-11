@@ -39,6 +39,7 @@ class BonusAgentTests(unittest.TestCase):
         result=run_agent('Kiểm tra',p,t,max_steps=5)
         self.assertEqual(result['status'],'completed')
         self.assertEqual(json.loads(p.histories[1][-1]['content'])['error'],'RATE_LIMITED')
+        self.assertEqual(json.loads(p.histories[1][-1]['content'])['requested_provider'],'vercel')
         self.assertEqual(json.loads(p.histories[2][-1]['content'])['provider'],'vercel')
     def test_invalid_arguments_observation_returns_to_model(self):
         t=BonusTools()
@@ -50,5 +51,43 @@ class BonusAgentTests(unittest.TestCase):
         self.assertEqual(result['status'],'completed')
         self.assertEqual(json.loads(p.histories[1][-1]['content'])['error'],'INVALID_ARGUMENTS')
         self.assertTrue(json.loads(p.histories[2][-1]['content'])['ok'])
+
+    def test_repeated_rate_limits_stop_real_tool_calls(self):
+        t=BonusTools(scenario='rate_limit_always')
+        p=ScriptedProvider([call(str(i),'get_vercel_status',{}) for i in range(4)] + [final()])
+        result=run_agent('Kiểm tra Vercel',p,t,max_steps=5)
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual(t.calls[('get_vercel_status','vercel')],3)
+        self.assertEqual(json.loads(p.histories[4][-1]['content'])['error'],'RATE_LIMITED')
+
+    def test_scope_question_requests_incident_details(self):
+        t=BonusTools()
+        p=ScriptedProvider([call('a','get_vercel_status',{}), final('Tóm tắt'), final('Không đủ chi tiết')])
+        result=run_agent('Đối chiếu phạm vi incident',p,t,max_steps=3)
+        self.assertEqual(result['status'],'completed')
+        self.assertTrue(any(x['event']=='validation_missing_incident_details' for x in result['trace']))
+
+    def test_requested_retry_is_reminded_before_final_answer(self):
+        t=BonusTools(scenario='rate_limit_once')
+        p=ScriptedProvider([call('a','get_vercel_status',{}), final('Chưa lấy được'),
+                            call('b','get_vercel_status',{}), final('Đã kiểm tra')])
+        result=run_agent('Kiểm tra Vercel và retry có giới hạn',p,t,max_steps=4)
+        self.assertEqual(result['status'],'completed')
+        self.assertTrue(any(x['event']=='validation_retry_pending' for x in result['trace']))
+        self.assertEqual(t.calls[('get_vercel_status','vercel')],2)
+
+    def test_no_retry_when_user_explicitly_declines(self):
+        t=BonusTools(scenario='rate_limit_once')
+        p=ScriptedProvider([call('a','get_vercel_status',{}), final('Chưa lấy được')])
+        result=run_agent('Kiểm tra Vercel, không thử lại',p,t,max_steps=2)
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual(t.calls[('get_vercel_status','vercel')],1)
+
+    def test_no_detail_gate_for_negated_causation(self):
+        t=BonusTools()
+        p=ScriptedProvider([call('a','get_vercel_status',{}), final('Đã kiểm tra')])
+        result=run_agent('Kiểm tra Vercel, không suy luận sự cố có chung nguyên nhân',p,t,max_steps=2)
+        self.assertEqual(result['status'],'completed')
+        self.assertFalse(any(x['event']=='validation_missing_incident_details' for x in result['trace']))
 
 if __name__=='__main__': unittest.main()
